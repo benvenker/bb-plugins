@@ -5,11 +5,14 @@ Parakeet Ultra speech model on the Neural Engine. The audio never leaves the
 Mac. The plugin also removes hesitations such as "um" and "э-э".
 
 ```text
-microphone in BB ──audio──▶ BB server (Mac)
-                              ffmpeg: webm or mp4 → wav
-                              parakeet-asr: Parakeet Ultra on the Neural Engine
-                              hesitations out
-composer       ◀──text──────
+microphone in BB ──80 ms chunks while you speak──▶ BB server (Mac)
+                 ──the recording after Stop──────▶   ffmpeg, without a stream:
+                                                       webm or mp4 → wav
+                                                     parakeet-asr: Parakeet
+                                                       Ultra on the Neural
+                                                       Engine
+                                                     hesitations out
+composer         ◀──text──────────────────────────
 ```
 
 ## Use
@@ -19,8 +22,11 @@ composer       ◀──text──────
 - **Any of 25 languages.** The model finds the language on its own: English,
   Russian, Ukrainian, German, French, Spanish, and 19 more European
   languages. A take can mix them.
-- **Fast.** On an M4, a 10-second take takes about 0.3 seconds, a 40-second
-  take 0.8 seconds, and a 20-minute take 24 seconds.
+- **Fast.** The plugin streams each take to the server while you speak, so
+  its text is in the composer about as soon as you stop, however long the
+  take. On an M4 it takes 0.05 seconds after Stop when you pause before it,
+  and 0.14 seconds when you stop mid-word, against 0.66 seconds from the
+  recording alone.
 - **Built-in microphone.** Under **Settings** → **Plugins** → **Voice Input**,
   set **Microphone** to **Built-in**, or run
   `bb plugin config voice-input set microphone built-in`
@@ -53,7 +59,7 @@ On its first load the plugin gets ready on its own, and **Settings** →
 **AI services** shows each step until it is ready:
 
 1. It downloads the model, 350 MB, from
-   `https://d390utbf6y9hg4.cloudfront.net/audio/v3` to
+   `https://models.shelest.app/models/audio/v3` to
    `~/Library/Application Support/bb-voice-input/parakeet-ultra`.
 2. It builds its recognizer, `parakeet-asr`, with `swiftc`, in a few seconds.
 3. It opens the model on the Neural Engine. macOS compiles the model for it
@@ -67,9 +73,29 @@ To go back to bb cloud, run `bb settings ai-services set voice automatic`.
 
 - The plugin registers an AI service for voice input. BB sends it the whole
   recording, up to 25 MB, and waits at most 70 seconds for the text.
-- ffmpeg decodes the recording, webm from desktop browsers or mp4 from
-  Safari, to a WAV file in a temporary folder.
-- `parakeet-asr` resamples the audio to 16 kHz with AVFoundation and runs the
+- The plugin's frontend wraps the browser's `getUserMedia` and taps each
+  audio-only stream BB opens; BB's stream stays as it is. It streams the
+  microphone to the server over a WebSocket,
+  `/api/v1/plugins/voice-input/http/stream`: 16 kHz 16-bit samples in chunks
+  of 80 ms, `size:<bytes>` for BB's recording of the take, then `end` once BB
+  stops the microphone. It learns the size from BB's `MediaRecorder`, which
+  it also wraps. The server takes the stream only while voice input uses
+  Parakeet Ultra.
+- The recognizer decodes each piece of a streamed take (below) as soon as the
+  audio after it fixes its cut, so a long take decodes while you speak. It
+  also decodes the last piece ahead every half second. At Stop, when that
+  guess ended in silence and only silence came after it, the text is ready;
+  otherwise the last piece, at most 15 seconds, decodes in about 50 ms.
+- BB's request gets the text of the newest streamed take when the recording
+  has the size the browser reported.
+- Once the text comes, BB's composer plays a 180 ms transition before it puts
+  it in, unless the system asks for reduced motion. For 2 seconds after BB
+  stops recording a streamed take, the frontend has the page see
+  `(prefers-reduced-motion: reduce)`, so the text goes in at once.
+- A recording with no streamed take, such as one BB retries or one whose
+  stream broke off, is decoded from the file: ffmpeg turns it, webm from
+  desktop browsers or mp4 from Safari, into a WAV file in a temporary folder.
+- `parakeet-asr` resamples a file to 16 kHz with AVFoundation and runs the
   four Core ML graphs of Parakeet TDT: the preprocessor, the encoder, the
   decoder, and the joint. It decodes greedily: at each 80 ms frame the joint
   names the likeliest token and how many frames to skip.
@@ -89,8 +115,8 @@ To go back to bb cloud, run `bb settings ai-services set voice automatic`.
   once per version of that source.
 - The plugin's frontend, an `experimental_appOverlay` slot, runs in every BB
   page: the Mac app, a browser, and the iPhone. While **Microphone** is
-  **Built-in**, it wraps the browser's `getUserMedia`. A request for audio
-  alone that names no microphone then opens the built-in one. A request that
+  **Built-in**, its `getUserMedia` wrapper also opens the built-in microphone
+  for a request for audio alone that names no microphone. A request that
   names a microphone, such as the one you picked in BB's settings, passes
   through unchanged.
 - The frontend finds the built-in microphone by name. Chromium marks it

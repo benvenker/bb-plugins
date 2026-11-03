@@ -5,7 +5,7 @@ import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 
 afterEach(cleanup);
 
-it("prefers the built-in microphone only while the setting says so", async () => {
+it("streams the microphone, and prefers the built-in one only while the setting says so", async () => {
   const getUserMedia = vi.fn();
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
@@ -14,10 +14,13 @@ it("prefers the built-in microphone only while the setting says so", async () =>
   const app = await loadPluginApp(() => import("./app"));
   const overlay = app.appOverlays[0]!;
   renderSlot(overlay, {}, { settings: { microphone: "automatic" } });
-  expect(navigator.mediaDevices.getUserMedia).toBe(getUserMedia);
+  const streaming = navigator.mediaDevices.getUserMedia;
+  expect(streaming).not.toBe(getUserMedia);
   cleanup();
+  expect(navigator.mediaDevices.getUserMedia).toBe(getUserMedia);
   renderSlot(overlay, {}, { settings: { microphone: "built-in" } });
   expect(navigator.mediaDevices.getUserMedia).not.toBe(getUserMedia);
+  expect(navigator.mediaDevices.getUserMedia).not.toBe(streaming);
   cleanup();
   expect(navigator.mediaDevices.getUserMedia).toBe(getUserMedia);
 });

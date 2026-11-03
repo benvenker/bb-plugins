@@ -73,13 +73,37 @@ export class RecognizerProcess {
    * wait for it; the next take starts a new one.
    */
   transcribe(audio: string, signal: AbortSignal): Promise<string> {
+    return this.ask({ audio }, signal);
+  }
+
+  /** Adds 16 kHz 16-bit little-endian samples to a take spoken right now. */
+  append(take: string, samples: Uint8Array): void {
+    const base64 = Buffer.from(samples).toString("base64");
+    this.write({ take, samples: base64 });
+  }
+
+  /** The text of a take that `append` brought in, which then ends. */
+  finish(take: string): Promise<string> {
+    return this.ask({ take, finish: true });
+  }
+
+  /** Forgets a take that nobody will ask for. */
+  drop(take: string): void {
+    this.write({ take, drop: true });
+  }
+
+  private ask(request: object, signal?: AbortSignal): Promise<string> {
     if (this.failure) return Promise.reject(this.failure);
     const id = this.next++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      signal.addEventListener("abort", () => this.close(), { once: true });
-      this.child.stdin.write(JSON.stringify({ id, audio }) + "\n");
+      signal?.addEventListener("abort", () => this.close(), { once: true });
+      this.write({ id, ...request });
     });
+  }
+
+  private write(request: object): void {
+    if (!this.failure) this.child.stdin.write(JSON.stringify(request) + "\n");
   }
 
   close(): void {

@@ -3,8 +3,9 @@ Dictate to your agents with a speech model that runs on your own Mac.
 ## Voice input on the Neural Engine
 
 The plugin transcribes BB's voice input with the Parakeet Ultra speech model
-on the BB server's Neural Engine. The audio never leaves the Mac. A 10-second
-take turns into text in about 0.3 seconds.
+on the BB server's Neural Engine. The audio never leaves the Mac. The plugin
+streams each take to the server while you speak, so its text is ready about
+as soon as you stop, however long the take.
 
 ## 25 languages, no hesitations
 

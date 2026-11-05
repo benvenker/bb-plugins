@@ -36,14 +36,25 @@ it("searches both layouts, preserves options and merges IDs per lifecycle", asyn
 });
 
 it("preserves Request headers and respects the result limit", async () => {
-  const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(result(["a", "b", "c"])));
+  const fetch = vi.fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(Response.json(result(["a", "b"])))
+    .mockResolvedValueOnce(Response.json(result(["c"])));
   const host = setup(fetch);
   const request = new Request(endpoint + "hello&limitPerGroup=2", { headers: { "x-test": "keep" } });
   const body = await (await host.fetch(request)).json();
   const second = fetch.mock.calls[1]![0] as Request;
   expect(second.headers.get("x-test")).toBe("keep");
   expect(second.url).toContain(encodeURIComponent("руддщ"));
-  expect(body.active.results).toHaveLength(2);
+  expect(body.active).toEqual({ ...result(["a", "b"]).active, total: 3 });
+});
+
+it("keeps every row and field BB sent", async () => {
+  const native = { ...result(["a", "b", "c"]), took: 5 };
+  const fetch = vi.fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(Response.json({ ...native, active: { ...native.active, more: true } }))
+    .mockResolvedValueOnce(Response.json(result(["d"])));
+  const body = await (await setup(fetch).fetch(endpoint + "hello&limitPerGroup=2")).json();
+  expect(body).toEqual({ ...native, active: { ...native.active, total: 4, more: true } });
 });
 
 it.each(["network", "http", "invalid"])("keeps native results when the alternate fails: %s", async (failure) => {

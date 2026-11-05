@@ -27,9 +27,9 @@ const selected = (input: Element) =>
   input.ownerDocument.getElementById(input.getAttribute("aria-activedescendant") || "");
 
 /**
- * In BB's thread search, ⌘↵ or Ctrl+↵ on the selected row runs
- * `actionFor(thread)` when it returns an action, and the row's "Open in split"
- * hint shows its label instead. Returns a disposer that restores BB's DOM.
+ * In BB's thread search, the selected row's "Open in split" hint shows the
+ * label of `actionFor(thread)` when it returns an action, and ⌘↵ or Ctrl+↵
+ * runs it. Returns a disposer that restores BB's DOM.
  */
 export function installSearchActions(
   doc: Document,
@@ -109,7 +109,9 @@ export function installSearchActions(
     if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey
       || event.isComposing || event.keyCode === 229
       || !(field instanceof Element && field.matches(INPUT))) return;
-    const action = actionOf(selected(field));
+    // Only while the row's hint names the action, so a BB that changes the row
+    // or the key keeps its own ⌘↵.
+    const action = hint && actionOf(selected(field));
     if (!action) return;
     // Before React's listener on its root, where BB opens the row in split.
     event.preventDefault();

@@ -14,7 +14,7 @@ import {
   type CapturedPluginApp,
 } from "@get-bb/plugin-sdk/testing/app";
 import { toast } from "sonner";
-import { asPluginApp, bbVersion } from "../testing";
+import { asPluginApp } from "../testing";
 import { searchCache } from "../universal-search/host";
 import type { Snooze } from "./server";
 import { CHANGED_CHANNEL } from "./shared";
@@ -27,10 +27,6 @@ vi.mock("sonner", () => ({
 }));
 vi.mock("../universal-search/host", () => ({ searchCache: vi.fn() }));
 vi.mock("./thread-search", () => ({ installSnoozedSearch: vi.fn() }));
-
-const sdk = (version?: string) => ({
-  system: { version: async () => bbVersion(version) },
-});
 
 interface Command {
   id: string;
@@ -109,7 +105,6 @@ async function openDialog(
     {},
     {
       context: { threadId: "t2", projectId: "p1" },
-      sdk: sdk(),
       rpc: {
         listSnoozes: () => list,
         snooze: (input) => ({
@@ -222,7 +217,6 @@ async function threadMenu(list: { snoozes: Snooze[]; last: unknown }) {
     {},
     {
       context: { threadId: "t2", projectId: "p1" },
-      sdk: sdk(),
       rpc: {
         listSnoozes: () => list,
         snooze: () => ({ title: "Fix the login bug", previous: null, hidden: ["t1"] }),
@@ -652,7 +646,6 @@ describe("thread search", () => {
 
   async function mount(
     settings: Record<string, boolean> = {},
-    version?: string,
     snoozes = [snoozed],
   ) {
     vi.mocked(searchCache).mockReturnValue(invalidate);
@@ -664,7 +657,6 @@ describe("thread search", () => {
       {},
       {
         settings,
-        sdk: sdk(version),
         rpc: {
           listSnoozes: () => list,
           searchSnoozes: () => ({ results }),
@@ -680,7 +672,7 @@ describe("thread search", () => {
     return { slot, list };
   }
 
-  it("adds snoozed threads on a checked BB and refreshes BB's search as they change", async () => {
+  it("adds snoozed threads and refreshes BB's search as they change", async () => {
     const { slot, list } = await mount();
     await vi.waitFor(() => expect(installSnoozedSearch).toHaveBeenCalledOnce());
     const [host, layouts, search] =
@@ -715,11 +707,10 @@ describe("thread search", () => {
   });
 
   it.each([
-    ["Snooze is off", { snooze: false }, undefined, [snoozed]],
-    ["BB is a version it wasn't checked on", {}, "0.45.0", [snoozed]],
-    ["nothing is snoozed", {}, undefined, []],
-  ])("leaves BB's search alone when %s", async (_, settings, version, snoozes) => {
-    await mount(settings, version, snoozes);
+    ["Snooze is off", { snooze: false }, [snoozed]],
+    ["nothing is snoozed", {}, []],
+  ])("leaves BB's search alone when %s", async (_, settings, snoozes) => {
+    await mount(settings, snoozes);
     await Promise.resolve();
     expect(installSnoozedSearch).not.toHaveBeenCalled();
     expect(invalidate).not.toHaveBeenCalled();

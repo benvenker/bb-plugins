@@ -53,6 +53,13 @@ export function installPaletteSearch(doc: Document) {
     if (!root || !field) return;
     const query = field.value.replace(/^>/, "");
     const native = [...root.querySelectorAll<HTMLElement>(`${ITEM}:not([${EXTRA}])`)];
+    // Extra rows show their selection as BB shows its own; when BB draws it
+    // another way, the arrows would move a selection nobody sees.
+    const chosen = native.find((row) => row.ariaSelected === "true");
+    if (chosen && !ACTIVE.every((name) => chosen.classList.contains(name))) {
+      candidates.clear();
+      return clear();
+    }
     const current = new Set<string>();
     const capture = !query.trim() || !candidates.size;
     for (const row of native) {

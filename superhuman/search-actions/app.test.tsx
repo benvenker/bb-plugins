@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { toast } from "sonner";
-import { asPluginApp, bbVersion } from "../testing";
+import { asPluginApp } from "../testing";
 import { searchCache } from "../universal-search/host";
 import { installSearchActions } from "./rows";
 
@@ -13,12 +13,22 @@ vi.mock("sonner", () => ({
 vi.mock("../universal-search/host", () => ({ searchCache: vi.fn() }));
 vi.mock("./rows", () => ({ installSearchActions: vi.fn() }));
 const invalidate = vi.fn();
-const version = vi.fn(async () => bbVersion());
 const fail = () => Promise.reject(new Error("offline"));
+const FILTER = "bb.palette.threadArchiveFilter";
+// Node's own localStorage, which needs a backing file, hides jsdom's; the
+// tests get an in-memory one.
+const storage = new Map<string, string>();
+const memory = {
+  getItem: (key: string) => storage.get(key) ?? null,
+  setItem: (key: string, value: string) => void storage.set(key, value),
+};
+vi.stubGlobal("localStorage", memory);
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  storage.clear();
+  vi.stubGlobal("localStorage", memory);
 });
 
 async function mount(failing = false) {
@@ -27,7 +37,6 @@ async function mount(failing = false) {
   const app = await loadPluginApp(asPluginApp(() => import("./app")));
   const slot = renderSlot(app.appOverlays[0]!, {}, {
     sdk: {
-      system: { version },
       threads: {
         unarchive: failing ? fail : async () => ({ ok: true as const }),
       },
@@ -84,12 +93,28 @@ it.each([
   expect(invalidate).not.toHaveBeenCalled();
 });
 
+it("lists archived threads in a browser that never changed the Filter", async () => {
+  await mount();
+  expect(JSON.parse(localStorage.getItem(FILTER)!)).toEqual(["active", "archived"]);
+});
+
+it("keeps the Filter someone picked", async () => {
+  localStorage.setItem(FILTER, JSON.stringify(["active"]));
+  await mount();
+  expect(localStorage.getItem(FILTER)).toBe(JSON.stringify(["active"]));
+});
+
+it("installs where storage is blocked", async () => {
+  vi.stubGlobal("localStorage", { getItem: () => { throw Error("blocked"); } });
+  await mount();
+});
+
 it("installs nothing when switched off", async () => {
   const app = await loadPluginApp(asPluginApp(() => import("./app")));
   renderSlot(app.appOverlays[0]!, {}, {
     settings: { searchActions: false },
-    sdk: { system: { version } },
   });
-  expect(version).not.toHaveBeenCalled();
+  expect(searchCache).not.toHaveBeenCalled();
   expect(installSearchActions).not.toHaveBeenCalled();
+  expect(localStorage.getItem(FILTER)).toBeNull();
 });

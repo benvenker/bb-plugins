@@ -17,9 +17,11 @@ function merge(first: Search, second: Search, limit: number): Search {
       return true;
     });
     // BB has no pagination here; totals cannot reveal the exact union of capped searches.
-    return { results: rows.slice(0, limit), total: rows.length };
+    // Keeps every row BB sent, and the fields this doesn't read.
+    const results = rows.slice(0, Math.max(limit, first[name].results.length));
+    return { ...first[name], results, total: rows.length };
   };
-  return { active: group("active"), archived: group("archived") };
+  return { ...first, active: group("active"), archived: group("archived") };
 }
 
 /** BB's thread-search request as a URL, or null for any other request. */
@@ -70,8 +72,8 @@ export function wrapThreadSearch(
     for (const linked of signals) linked?.addEventListener("abort", abort, { once: true });
     if (signals.some((linked) => linked?.aborted)) abort();
     const primary = original.call(host, input, init);
-    // BB allows at most 50 per group.
-    const limit = Math.max(1, Math.min(50, Number(url.searchParams.get("limitPerGroup")) || 20));
+    // What the search asked for, or BB's default.
+    const limit = Math.max(1, Number(url.searchParams.get("limitPerGroup")) || 20);
     const side = signal.aborted ? null : extend({
       url, limit, signal,
       fetch: (other) => original.call(host, request ? new Request(other, request) : other, { ...init, signal }),

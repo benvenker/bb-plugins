@@ -11,8 +11,9 @@ Superhuman-style speed for BB:
   from the moon in its header or any thread menu; **Show snoozed threads** lists
   them.
 - **Archive Button.** Archive a thread from its header, next to Snooze.
-- **Search Actions.** In thread search, **⌘↵** unsnoozes a snoozed thread or
-  unarchives an archived one instead of opening it in split.
+- **Search Actions.** Thread search lists archived threads too, and **⌘↵**
+  unsnoozes a snoozed thread or unarchives an archived one instead of opening
+  it in split.
 - **Dismiss Cards.** A close button on the cards above a thread's message box
   for background work, child threads, and the pull request; a card stays
   hidden in its thread until its words change.
@@ -62,21 +63,22 @@ Universal Search supports US English and Russian ЙЦУКЕН in both directions
 keeps the input unchanged, and combines matches without duplicate rows. BB has
 no way for plugins to extend its search, so in the command palette and thread
 search it reads the palette's React row handlers and wraps its thread-search
-requests. That is verified for BB 0.47.0 and 0.47.1 and turns itself off on
-other versions until checked again; the snoozed-thread filter works on any
-version.
+requests.
 
 BB's thread search leaves out the threads a snooze hides, so Snooze adds them,
 matched by title the way BB matches titles, and in both layouts while
-Universal Search is on. It wraps the same thread-search requests and follows
-the same version check.
+Universal Search is on. It wraps the same thread-search requests.
 
-Archived threads show in thread search once you tick **Archived** in its
-**Filter and sort** menu. On a snoozed or archived thread there, Search Actions
-makes **⌘↵** (**Ctrl+↵** on Windows and Linux) unsnooze or unarchive it instead
-of opening it in split, and the row's hint says which. On a thread hidden by a
-parent's snooze, **⌘↵** wakes that snooze, which brings the parent back too.
-Search Actions reads the palette's rows and follows the same version check.
+Search Actions ticks **Archived** in thread search's **Filter and sort** menu
+once, so archived threads show there too, unless you changed that menu in this
+browser. Turning it off leaves the menu as it is. Where a snoozed or archived
+row shows BB's **Open in split** hint, Search Actions puts its own action
+there: **⌘↵** (**Ctrl+↵** on Windows and Linux) unsnoozes or unarchives the
+thread instead of opening it in split. On a thread hidden by a parent's
+snooze, **⌘↵** wakes that snooze, which brings the parent back too.
+
+Universal Search, Snooze, and Search Actions check what they read of BB's
+search and leave it alone when a BB update changes it.
 
 ```sh
 bb marketplace add git:https://github.com/rebryk/bb-plugins.git@main

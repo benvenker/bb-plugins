@@ -23,10 +23,15 @@ const nativeFetch = () => vi.fn<typeof globalThis.fetch>(async () => Response.js
 
 it("adds snoozed threads to active among BB's title matches, within the limit", async () => {
   const search = vi.fn<Search>(async () => [row("s1", 20), row("s2", 5), row("a", 30)]);
-  const response = await setup(nativeFetch(), search).fetch(endpoint + "hello&limitPerGroup=4");
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({
+    ...native(), took: 5, active: { ...native().active, more: true },
+  }));
+  const response = await setup(fetch, search).fetch(endpoint + "hello&limitPerGroup=4");
   const body = await response.json();
   expect(ids(body)).toEqual(["a", "s1", "b", "s2"]);
   expect(body.active.total).toBe(5);
+  // Fields this doesn't read stay as BB sent them.
+  expect([body.took, body.active.more]).toEqual([5, true]);
   expect(body.archived).toEqual(native().archived);
 });
 

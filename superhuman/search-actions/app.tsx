@@ -10,6 +10,9 @@ import type { rpcContract } from "../snooze/server";
 import { useSearchAdapter } from "../universal-search/app";
 import { installSearchActions, type SearchThread } from "./rows";
 
+/** Where BB saves its thread search's Filter choice: Active, Archived, or both. */
+const FILTER = "bb.palette.threadArchiveFilter";
+
 function SearchActions() {
   const { values, isLoading } = useSettings();
   const sdk = useSdk();
@@ -34,6 +37,15 @@ function SearchActions() {
         }
         return null;
       };
+      // Ticks Archived where nobody changed the Filter in this browser. BB
+      // reads the choice each time its search opens.
+      try {
+        if (localStorage.getItem(FILTER) === null) {
+          localStorage.setItem(FILTER, JSON.stringify(["active", "archived"]));
+        }
+      } catch {
+        // Blocked storage leaves the Filter as it is.
+      }
       disposers.push(installSearchActions(document, actionFor));
     },
     [sdk, rpc],

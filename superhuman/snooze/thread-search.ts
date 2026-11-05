@@ -68,6 +68,7 @@ export function installSnoozedSearch(
         return {
           ...body,
           active: {
+            ...body.active,
             results: merged.slice(0, limit),
             total: total + added.length,
           },

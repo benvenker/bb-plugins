@@ -39,7 +39,7 @@ export default async function plugin(bb: BbPluginApi) {
       type: "boolean",
       label: "Search Actions",
       description:
-        "In thread search, ⌘↵ (Ctrl+↵) unsnoozes a snoozed thread or unarchives an archived one instead of opening it in split.",
+        "Ticks Archived in thread search's filter once, so archived threads show there too, and ⌘↵ (Ctrl+↵) unsnoozes a snoozed thread or unarchives an archived one instead of opening it in split.",
       default: true,
     },
     dismissCards: {

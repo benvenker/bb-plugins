@@ -157,7 +157,7 @@ it("follows the selection, re-rendered rows, and changed actions, restoring BB's
   expect(hints()).toEqual([]);
 });
 
-it("shows no hint without a split button or its label, and no action for unknown rows", async () => {
+it("leaves ⌘↵ to BB without a split button or its label, and on unknown rows", async () => {
   const more = row(5, archived("f")), bare = row(6, archived("g")), unlabeled = row(7, archived("h"));
   Reflect.set(more.firstElementChild!, "__reactProps$test", { children: ["Show more"] });
   Reflect.deleteProperty(bare.firstElementChild!, "__reactProps$test");
@@ -173,8 +173,6 @@ it("shows no hint without a split button or its label, and no action for unknown
   expect(hints()).toEqual([]);
   expect(split(7).hidden).toBe(false);
   key({ metaKey: true });
-  expect(run.mock.calls).toEqual([["Unarchive", "phone"], ["Unarchive", "h"]]);
-  run.mockClear();
   for (const index of [4, 5, 6]) {
     select(index);
     await settle();
@@ -183,7 +181,7 @@ it("shows no hint without a split button or its label, and no action for unknown
     key({ metaKey: true });
   }
   expect(run).not.toHaveBeenCalled();
-  expect(bb).toHaveBeenCalledTimes(3);
+  expect(bb).toHaveBeenCalledTimes(5);
 });
 
 it("does nothing until a thread search input takes focus", async () => {

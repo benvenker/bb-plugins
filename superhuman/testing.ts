@@ -13,17 +13,3 @@ export function asPluginApp(load: () => Promise<{ default: PluginAppSetup }>) {
     return definePluginApp(feature.default);
   };
 }
-
-/** What `sdk.system.version()` answers on a BB of this version. */
-export function bbVersion(currentVersion = "0.47.1") {
-  return {
-    currentVersion,
-    currentCommit: null,
-    installKind: "npm" as const,
-    isDevelopment: false,
-    latestVersion: null,
-    source: "npm" as const,
-    updateAvailable: false,
-    upgradeCommand: "",
-  };
-}

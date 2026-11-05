@@ -37,16 +37,16 @@ pooled account.
 Superhuman-style speed for BB: hints with the remaining keys of visible
 shortcuts, slash to search threads, H to snooze and E to archive, and number
 keys that set up a new thread's project, model, machine, and branch, all in any
-keyboard layout; search in the command palette and thread search that also
-finds what the query means in the other keyboard layout, English or Russian;
-a moon that snoozes a thread until a time you pick or until its agent needs
-you, in its header and in every thread menu just before Archive, with an Archive
-button beside it; ⌘↵ in thread search to unsnooze or unarchive a thread; a close
-button on the cards above a thread's message box; BB's bars at the bottom of a
-phone's screen, with swipes from its edges and haptics; an option to drop the
-macOS app's title bar; one tone for BB's icons, with no external editor picker
-in the thread bar; and an option for agents to answer in few words of plain
-English.
+keyboard layout; search in the command palette and thread search that also finds
+what the query means in the other keyboard layout, English or Russian; a moon
+that snoozes a thread until a time you pick or until its agent needs you, in its
+header and in every thread menu just before Archive, with an Archive button
+beside it; archived threads in thread search, where ⌘↵ unsnoozes or unarchives a
+thread; a close button on the cards above a thread's message box; BB's bars at
+the bottom of a phone's screen, with swipes from its edges and haptics; an
+option to drop the macOS app's title bar; one tone for BB's icons, with no
+external editor picker in the thread bar; and an option for agents to answer in
+few words of plain English.
 
 ### [Bookmarks](./bookmarks)
 

@@ -78,6 +78,18 @@ it("preserves real matches, deduplicates and navigates the merged list", async (
   expect(options().filter((row) => row.ariaSelected === "true")).toEqual([options().at(-1)]);
 });
 
+it.each([
+  ["the way BB does", "bg-state-hover text-foreground", ["Snooze thread"]],
+  ["another way", "bg-accent", []],
+])("adds rows only while BB draws its selected row %s", async (_, className, titles) => {
+  const selected = document.getElementById("native-snooze")!;
+  selected.ariaSelected = "true";
+  selected.className = className;
+  type("ытщщяу");
+  await settle();
+  expect(options().map((row) => row.textContent)).toEqual(titles);
+});
+
 it("hides the native empty state only while there are alternate matches", async () => {
   type("ытщщяу");
   const empty = document.createElement("p");
@@ -93,13 +105,16 @@ it("hides the native empty state only while there are alternate matches", async 
 it("restores selection on close and recaptures commands when the drawer reopens", async () => {
   const original = nativeRow("ru", "Привет");
   original.ariaSelected = "true";
+  original.className = "bg-state-hover text-foreground";
   type("т", [original]);
   await settle();
   key("End");
+  expect(original.ariaSelected).toBe("false");
   const root = document.querySelector<HTMLElement>("[data-testid]")!;
   root.dataset.state = "closed";
   await settle();
   expect(original.ariaSelected).toBe("true");
+  expect(original.className).toBe("bg-state-hover text-foreground");
   expect(options()).toEqual([original]);
   type("", [nativeRow("new", "New thread")]);
   root.dataset.state = "open";

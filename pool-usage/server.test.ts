@@ -547,6 +547,156 @@ describe("plugin", () => {
     await harness.lifecycle.dispose();
   });
 
+  it("reads bb 0.49's status, which reports windows only as limitWindows", async () => {
+    const observedAt = Date.now();
+    const window = (slot: string, windowMinutes: number, utilization: number) => ({
+      slot,
+      windowMinutes,
+      utilization,
+      resetAt: observedAt + windowMinutes * 60_000,
+      status: "allowed",
+      observedAt,
+      source: "usage",
+    });
+    const pooled = (
+      id: string,
+      provider: "claude" | "codex",
+      subscriptionType: string,
+      rateLimitTier: string | null,
+      limitWindows: ReturnType<typeof window>[],
+    ) => ({
+      id,
+      provider,
+      kind: "oauth",
+      label: `Label ${id}`,
+      email: `${id}@example.com`,
+      accountUuid: provider === "claude" ? `uuid-${id}` : null,
+      ...(provider === "codex" ? { codexAccountId: `chatgpt-${id}` } : {}),
+      subscriptionType,
+      rateLimitTier,
+      enabled: true,
+      priority: 100,
+      createdAt: observedAt - 1_000,
+      lastUsedAt: observedAt - 500,
+      lastUsedHostId: "host_example",
+      lastUsedHostName: "Example host",
+      usageRestriction: null,
+      extraUsage: { status: "rejected", observedAt, source: "usage" },
+      representativeClaim: null,
+      familyWeekly: {
+        fable: null,
+        sonnet: null,
+        opus: null,
+        haiku: null,
+        other: null,
+      },
+      limitWindows,
+      observedAt,
+      heldUntil: null,
+      error: null,
+      inFlight: 0,
+      status: "ready",
+    });
+    // The shape bb 0.49.0's Account Pooler returns from status.get, which
+    // dropped the fiveHour* and sevenDay* fields.
+    const status = {
+      route: "/api/v1/plugins/account-pool/http",
+      enabledAccountCount: 3,
+      inFlight: 0,
+      accepting: true,
+      hosts: [
+        {
+          hostId: "host_example",
+          hostName: "Example host",
+          mintedAt: observedAt - 2_000,
+          lastUsedAt: observedAt,
+        },
+      ],
+      accounts: [
+        pooled("team", "claude", "claude_team", "default_claude_max_5x", [
+          window("primary", 300, 0.05),
+          window("secondary", 10_080, 0.13),
+        ]),
+        pooled("max", "claude", "max", null, [
+          window("secondary", 10_080, 0.43),
+        ]),
+        pooled("prolite", "codex", "prolite", null, [
+          window("primary", 10_080, 0.37),
+        ]),
+      ],
+      routing: { claude: true, codex: true },
+      parent: null,
+      routedThreadsWithoutLocalLogin: [],
+    };
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "pool-usage",
+      sdk: {
+        plugins: {
+          // Like bb, validate the reply against the caller's output schema.
+          callRpc: async (request: {
+            method: string;
+            outputSchema: { parse: (value: unknown) => unknown };
+          }) =>
+            request.outputSchema.parse(
+              request.method === "config.get"
+                ? { switchThreshold: 0.95 }
+                : status,
+            ),
+        },
+      },
+    });
+    await plugin(bb);
+
+    const result = (await harness.behavior.callRpc(
+      "usage_get",
+    )) as UsageSnapshot;
+
+    expect(
+      harness.inspection.logEntries
+        .map(({ message }) => message)
+        .filter((message) => message.includes("Account Pooler status")),
+    ).toEqual([]);
+    const windows = (...readings: [number, number][]) =>
+      readings.map(([minutes, utilization]) => ({
+        minutes,
+        utilization,
+        resetAt: observedAt + minutes * 60_000,
+        rejected: false,
+      }));
+    expect(result.providers).toEqual([
+      { id: "claude-code", switchThreshold: 0.95 },
+      { id: "codex", switchThreshold: 0.95 },
+    ]);
+    expect(
+      result.accounts.map(({ id, provider, offline, windows }) => ({
+        id,
+        provider,
+        offline,
+        windows,
+      })),
+    ).toEqual([
+      {
+        id: "team",
+        provider: "claude-code",
+        offline: null,
+        windows: windows([300, 0.05], [10_080, 0.13]),
+      },
+      {
+        id: "max",
+        provider: "claude-code",
+        offline: null,
+        windows: windows([10_080, 0.43]),
+      },
+      {
+        id: "prolite",
+        provider: "codex",
+        offline: null,
+        windows: windows([10_080, 0.37]),
+      },
+    ]);
+    await harness.lifecycle.dispose();
+  });
+
   it("serves every caller within 15 seconds from one read", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const { bb, harness } = createFakePluginHost({

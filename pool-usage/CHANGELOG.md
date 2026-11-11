@@ -3,6 +3,13 @@
 Newest version first. [Releases](../README.md#releases) explains when a change
 gets a new version. Each version is tagged `pool-usage/v<version>`.
 
+## 0.2.7 (2026-11-11)
+
+- Pool Usage reads Account Pooler again on bb 0.49 and later. That Account
+  Pooler reports an account's five-hour and weekly windows only as limit
+  windows, so Pool Usage failed to read its status and showed none of its
+  accounts or resets. It now takes the windows from either form.
+
 ## 0.2.6 (2026-10-02)
 
 - **Reset to** now picks the reset that frees the most quota across all the

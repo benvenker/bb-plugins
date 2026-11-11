@@ -346,6 +346,7 @@ describe("resets list", () => {
                   count: 3,
                   expiresAt: NOW + 2 * DAY,
                   clears: [300, 10_080],
+                  clearsOther: ["Fable weekly"],
                   blocked: "needs-limit",
                   next: true,
                 }),
@@ -419,7 +420,7 @@ describe("resets list", () => {
     const list = await openList(slot, "Codex", 3);
     const codex = within(list).getByRole("region", { name: "Codex resets" });
     expect(codex.querySelector(".pool-usage-advice")?.textContent).toBe(
-      "Use first: a reset on Personal. Brings Codex from 90% to 0%.",
+      "Use first: a reset on Personal (codex@example.com, Pro 20x). Brings Codex from 90% to 0%.",
     );
     const personal = within(codex).getByRole("article", { name: "Personal" });
     expect(personal.querySelector("header")?.textContent).toBe(
@@ -446,7 +447,7 @@ describe("resets list", () => {
     );
     const main = within(claude).getByRole("article", { name: "Main" });
     expect(rows(main)).toEqual([
-      "Launch resetExpires Sep 27 (2 days left)Clears 5-hour and weekly limits3 resetsNeeds the account to be at a limit",
+      "Launch resetExpires Sep 27 (2 days left)Clears 5-hour, weekly and Fable weekly limits3 resetsNeeds the account to be at a limit",
       "Expires Oct 22 (27 days left)Clears weekly and Fable weekly limits5 resetsPaused · not in the total",
     ]);
     expect(claude.textContent).not.toContain("Use first");

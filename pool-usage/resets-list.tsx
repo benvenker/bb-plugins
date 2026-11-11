@@ -13,6 +13,7 @@ import {
   Modal,
   SECONDARY_BUTTON_CLASS,
   UseResetButton,
+  describeAccount,
   formatDate,
   type NamedUsage,
 } from "./reset-dialog";
@@ -37,7 +38,9 @@ function describeClears({ clears, clearsOther }: ResetDetail): string {
     ...clearsOther,
   ];
   if (names.length === 0) return "Claude doesn't say what it clears";
-  return `Clears ${names.join(" and ")} ${names.length === 1 ? "limit" : "limits"}`;
+  const last = names.pop()!;
+  const list = names.length === 0 ? last : `${names.join(", ")} and ${last}`;
+  return `Clears ${list} ${names.length === 0 ? "limit" : "limits"}`;
 }
 
 const BLOCKERS: Record<NonNullable<ResetDetail["blocked"]>, string> = {
@@ -242,7 +245,7 @@ function ProviderResets({
       {plan !== null ? (
         <p className="pool-usage-advice">
           <strong>Use first:</strong> a reset on{" "}
-          {plan.account.label ?? plan.account.email ?? "one account"}. Brings{" "}
+          {describeAccount(plan.account)}. Brings{" "}
           {usage.name} from {formatPercent(plan.used.before)} to{" "}
           {formatPercent(plan.used.after)}.
         </p>

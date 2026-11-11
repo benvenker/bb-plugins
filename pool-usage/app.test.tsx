@@ -83,6 +83,7 @@ const credit = (overrides: Partial<ResetDetail> = {}): ResetDetail => ({
   counted: true,
   expiresAt: Date.UTC(2026, 9, 22, 12),
   clears: null,
+  clearsOther: [],
   blocked: null,
   blockedUntil: null,
   next: false,
@@ -352,6 +353,7 @@ describe("resets list", () => {
                   count: 5,
                   counted: false,
                   clears: [10_080],
+                  clearsOther: ["Fable weekly"],
                   blocked: "paused",
                 }),
               ],
@@ -445,7 +447,7 @@ describe("resets list", () => {
     const main = within(claude).getByRole("article", { name: "Main" });
     expect(rows(main)).toEqual([
       "Launch resetExpires Sep 27 (2 days left)Clears 5-hour and weekly limits3 resetsNeeds the account to be at a limit",
-      "Expires Oct 22 (27 days left)Clears weekly limit5 resetsPaused · not in the total",
+      "Expires Oct 22 (27 days left)Clears weekly and Fable weekly limits5 resetsPaused · not in the total",
     ]);
     expect(claude.textContent).not.toContain("Use first");
     expect(within(main).queryByRole("button")).toBeNull();

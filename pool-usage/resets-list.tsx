@@ -30,10 +30,13 @@ function windowName(minutes: number | null): string {
 }
 
 /** What a reset clears, such as "5-hour and weekly limits". */
-function describeClears(clears: number[] | null): string {
+function describeClears({ clears, clearsOther }: ResetDetail): string {
   if (clears === null) return "Clears all limits";
-  if (clears.length === 0) return "Clears limits Claude doesn't name";
-  const names = clears.map((minutes) => windowName(minutes).toLowerCase());
+  const names = [
+    ...clears.map((minutes) => windowName(minutes).toLowerCase()),
+    ...clearsOther,
+  ];
+  if (names.length === 0) return "Claude doesn't say what it clears";
   return `Clears ${names.join(" and ")} ${names.length === 1 ? "limit" : "limits"}`;
 }
 
@@ -111,7 +114,7 @@ function ResetRow({
       <span className="pool-usage-reset-main">
         {item.title === null ? null : <strong>{item.title}</strong>}
         <span>{describeExpiry(item.expiresAt, now)}</span>
-        <span>{describeClears(item.clears)}</span>
+        <span>{describeClears(item)}</span>
       </span>
       <span className="pool-usage-reset-side">
         <span>{plural(item.count, "reset")}</span>

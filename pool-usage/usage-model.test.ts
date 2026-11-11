@@ -443,6 +443,7 @@ describe("resetWarning", () => {
       counted: true,
       expiresAt: NOW + 30 * DAY,
       clears: null,
+      clearsOther: [],
       blocked: null,
       blockedUntil: null,
       next: false,

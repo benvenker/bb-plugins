@@ -128,6 +128,8 @@ const resetDetailSchema = z.object({
   expiresAt: z.number().int().nullable(),
   /** The lengths, in minutes, of the windows it clears; null for all. */
   clears: z.array(z.number().int().positive()).nullable(),
+  /** Other limits it clears, such as "Fable weekly", by name. */
+  clearsOther: z.array(z.string()),
   /** Why it can't be used now; null when it can. */
   blocked: z
     .enum([
@@ -861,6 +863,25 @@ function claudeClears(grant: Json): number[] {
   );
 }
 
+/** Claude's per-model weekly limits, which aren't usage windows here. */
+const CLAUDE_MODEL_WINDOWS = new Map([
+  ["seven_day_opus", "Opus weekly"],
+  ["seven_day_sonnet", "Sonnet weekly"],
+  // Claude reports the Fable weekly cap as the included overage.
+  ["seven_day_overage_included", "Fable weekly"],
+]);
+
+/** The other limits a grant clears, by a readable name. */
+function claudeOtherClears(grant: Json): string[] {
+  return (Array.isArray(grant.clears) ? grant.clears : []).flatMap(
+    (name: unknown) => {
+      const key = String(name);
+      if (CLAUDE_WINDOWS.has(key)) return [];
+      return [CLAUDE_MODEL_WINDOWS.get(key) ?? key.replaceAll("_", " ")];
+    },
+  );
+}
+
 /** Why Claude won't apply the grant now, in the order Claude checks. */
 function grantBlocker(
   grant: Json,
@@ -1110,6 +1131,7 @@ export default function plugin(bb: BbPluginApi): void {
           counted: supported,
           expiresAt: parseTime(credit.expires_at),
           clears: null,
+          clearsOther: [],
           blocked: supported ? null : "unsupported",
           blockedUntil: null,
           next: credit.id === next?.id,
@@ -1168,6 +1190,7 @@ export default function plugin(bb: BbPluginApi): void {
           counted: open.includes(each),
           expiresAt: parseTime(each.ends_at),
           clears: claudeClears(each),
+          clearsOther: claudeOtherClears(each),
           ...grantBlocker(each, program, now),
           next: each === grant,
         }),

@@ -18,20 +18,33 @@ footer's `…` menu:
 [Claude] Claude 2x     60%
 1h 25m                 48%
 1d 6h                   0%
-Reset to 12% (1 available)
+View resets (8 available)
 ```
 
 - `2x` is the number of accounts that count, shown when there are several.
 - Up to four lines show when the total drops next, as quota windows reset or
   holds end, and what it drops to, assuming no new usage.
-- **Reset to** shows up when Account Pooler's accounts hold resets, which
-  Claude and Codex grant to clear an account's usage limits early. It gives the
-  total right after the reset worth spending first, and how many the accounts
-  hold. When none can lower the total right now, a gray line only counts them.
-- Clicking **Reset to** asks first, in bb's dialog or, on a phone, its bottom
-  sheet. It names the account, when the reset expires, and the total before
-  and after. **Use reset** spends it, a toast confirms it, and the card reads
-  usage again. Closing it any other way spends nothing.
+- **View resets** shows up when Account Pooler's accounts hold resets, which
+  Claude and Codex grant to clear an account's usage limits early, and counts
+  them. Clicking it spends nothing: it opens the list of every reset on every
+  Account Pooler account, this provider first, in bb's dialog or, on a phone,
+  its bottom sheet.
+- The list gives each provider's total, then each account: its plan, each
+  limit with how much is used and when it resets on its own, and one row per
+  Codex credit or Claude grant, with when it expires, what it clears, how many
+  resets it holds, and whether it can be used now or why not (paused, cooling
+  down, waiting for an earlier grant, or needing the account at a limit).
+  Paused grants and credits the plan doesn't support aren't in the total.
+- **Use first** marks the reset worth spending first, with what it does to the
+  provider's total. When no reset is worth using, the list says so and why.
+- An account warns "Use or lose" when a reset expires within 72 hours, or when
+  it holds more resets than its limits reset on their own before they expire.
+  When its resets can't be read, it says so, with the age of the last good
+  reading, rather than showing none.
+- **Use reset** on an account asks first. It names the account, when the reset
+  expires, and the total before and after. **Use reset** there spends it, a
+  toast confirms it, and the card reads usage again. Closing it any other way
+  spends nothing.
 - If a try fails, **Try again** repeats the same request, which never uses a
   second reset. When the provider keeps the reset, or the account's login
   can't be used, the dialog says why.

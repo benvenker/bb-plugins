@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { UsageAccount, UsageWindow } from "./server";
+import type { ResetDetail, UsageAccount, UsageWindow } from "./server";
 import {
   formatDuration,
   formatPercent,
   hasSpentQuota,
   isHot,
   redThreshold,
+  resetWarning,
   summarizeUsage,
 } from "./usage-model";
 
@@ -399,6 +400,105 @@ describe("resetPlan", () => {
     ]);
     expect(codex?.used).toBeCloseTo(0.252);
     expect(codex?.resetPlan).toBeNull();
+  });
+});
+
+describe("accountPlans", () => {
+  it("says what each account's reset would change, worth it or not", () => {
+    const reset = { expiresAt: NOW + 30 * DAY, clears: null };
+    const [codex] = summarize([
+      usageAccount({
+        id: "busy",
+        provider: "codex",
+        windows: [quota(10_080, 0.9, NOW + 6 * DAY)],
+        reset,
+      }),
+      // Its reset frees nothing, so it is never the one to use first.
+      usageAccount({
+        id: "idle",
+        provider: "codex",
+        windows: [quota(10_080, 0, NOW + 6 * DAY)],
+        reset,
+      }),
+      usageAccount({
+        id: "none",
+        provider: "codex",
+        windows: [quota(10_080, 0.5, NOW + DAY)],
+      }),
+    ]);
+
+    expect(codex?.resetPlan?.account.id).toBe("busy");
+    expect([...codex!.accountPlans.keys()]).toEqual(["busy", "idle"]);
+    const idle = codex!.accountPlans.get("idle")!;
+    expect(idle.used.before).toBeCloseTo((0.9 + 0 + 0.5) / 3);
+    expect(idle.used.after).toBe(idle.used.before);
+  });
+});
+
+describe("resetWarning", () => {
+  function detail(overrides: Partial<ResetDetail> = {}): ResetDetail {
+    return {
+      title: null,
+      count: 1,
+      counted: true,
+      expiresAt: NOW + 30 * DAY,
+      clears: null,
+      blocked: null,
+      blockedUntil: null,
+      next: false,
+      ...overrides,
+    };
+  }
+
+  /** A Claude account whose weekly window resets in a day. */
+  const holding = (...items: ResetDetail[]) =>
+    usageAccount({
+      windows: [quota(300, 0.2, NOW + HOUR), quota(10_080, 0.5, NOW + DAY)],
+      resets: { readAt: NOW, failed: false, items },
+    });
+
+  it("warns of a counted reset that expires within 72 hours", () => {
+    expect(
+      resetWarning(holding(detail({ expiresAt: NOW + 71 * HOUR })), NOW),
+    ).toEqual({ kind: "expiring", at: NOW + 71 * HOUR });
+    expect(
+      resetWarning(holding(detail({ expiresAt: NOW + 73 * HOUR })), NOW),
+    ).toBeNull();
+    // One that can't count, such as a paused grant, is no reason to hurry.
+    expect(
+      resetWarning(
+        holding(detail({ expiresAt: NOW + HOUR, counted: false })),
+        NOW,
+      ),
+    ).toBeNull();
+  });
+
+  it("warns of more resets than the limits reset on their own before they expire", () => {
+    // The weekly window resets on days 1, 8, 15, 22 and 29 before day 30.
+    expect(resetWarning(holding(detail({ count: 5 })), NOW)).toBeNull();
+    expect(resetWarning(holding(detail({ count: 6 })), NOW)).toEqual({
+      kind: "surplus",
+      resets: 6,
+      natural: 5,
+      by: NOW + 30 * DAY,
+      minutes: 10_080,
+    });
+    // A five-hour-only reset is weighed against the five-hour window.
+    expect(
+      resetWarning(holding(detail({ count: 6, clears: [300] })), NOW),
+    ).toBeNull();
+  });
+
+  it("has nothing to say without readings", () => {
+    expect(resetWarning(usageAccount(), NOW)).toBeNull();
+    expect(
+      resetWarning(
+        usageAccount({
+          resets: { readAt: NOW, failed: false, items: [detail({ count: 9 })] },
+        }),
+        NOW,
+      ),
+    ).toBeNull();
   });
 });
 

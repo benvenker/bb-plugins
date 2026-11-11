@@ -3,6 +3,26 @@
 Newest version first. [Releases](../README.md#releases) explains when a change
 gets a new version. Each version is tagged `pool-usage/v<version>`.
 
+## 0.2.8 (2026-11-11)
+
+- A provider's card ends with **View resets (N available)** instead of
+  **Reset to**. It spends nothing: it opens a list of every reset on every
+  Account Pooler account, Claude and Codex, with the clicked provider first.
+- Each account shows its plan, each limit with how much is used and when it
+  resets on its own, and one row per Codex credit or Claude grant: when it
+  expires, what it clears, how many resets it holds, and whether it can be
+  used now or why not. Paused grants and credits the plan doesn't support
+  are listed but left out of the total, and expired or used ones are gone.
+- **Use first** marks the reset worth spending first, with what it does to
+  the provider's total; when none is worth using, the list says why. An
+  account warns "Use or lose" when a reset expires within 72 hours or it
+  holds more resets than its limits reset on their own before they expire.
+- **Use reset** on an account opens the same confirmation as before.
+- When an account's resets can't be read, the list says so, with the age of
+  the last good reading, instead of showing none.
+- A Codex account's count now comes from the credits it can spend, so the
+  total matches the list.
+
 ## 0.2.7 (2026-11-11)
 
 - Pool Usage reads Account Pooler again on bb 0.49 and later. That Account

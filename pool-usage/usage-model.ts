@@ -35,6 +35,8 @@ export interface ProviderUsage {
   availableResets: number;
   /** The reset worth spending first; null when none lowers `used`. */
   resetPlan: ResetPlan | null;
+  /** What spending each account's next reset would change, by account id. */
+  accountPlans: Map<string, ResetPlan>;
   accounts: UsageAccount[];
 }
 
@@ -240,72 +242,54 @@ function resetSteps(
 }
 
 /**
- * The reset worth spending: plan weight times how much more the account
- * serves with it, through every window it clears, summed over time until the
- * account would free up on its own, within a week. Of resets worth about the
- * same, the one that expires first. Only a reset that lowers the percentage
- * shown now.
+ * What spending `account`'s next reset would change, and its worth: plan
+ * weight times how much more the account serves with it, through every
+ * window it clears, summed over time until the account would free up on its
+ * own, within a week. Null for an account without a reset it can spend.
  */
-function planReset(
+function evaluateReset(
   accounts: readonly UsageAccount[],
+  account: UsageAccount,
   used: number,
   switchThreshold: number,
   now: number,
-): ResetPlan | null {
+): { plan: ResetPlan; score: number } | null {
+  const { reset } = account;
+  if (!reset || !countsTowardCapacity(account) || account.offline !== null) {
+    return null;
+  }
   const end = now + RESET_HORIZON_MS;
   const available = (account: UsageAccount, time: number) =>
     availableAt(account, time, switchThreshold);
   const served = (account: UsageAccount, until: number) =>
     servedUntil(account, until, switchThreshold, now);
-  let best: ResetPlan | null = null;
-  let bestScore = 0;
-  for (const account of accounts) {
-    const { reset } = account;
-    if (!reset || !countsTowardCapacity(account) || account.offline !== null) {
-      continue;
-    }
-    const cleared = ({ minutes }: UsageWindow) =>
-      reset.clears === null || reset.clears.includes(minutes ?? 0);
-    // A hold stays: Account Pooler keeps it through a new reading.
-    const after = {
-      ...account,
-      blocked: account.blocked && !account.windows.some(cleared),
-      windows: account.windows.map((window) =>
-        cleared(window)
-          ? { ...window, utilization: 0, resetAt: null, rejected: false }
-          : window,
-      ),
-    };
-    const swapped = accounts.map((other) =>
-      other === account ? after : other,
-    );
-    const usedAfter = usageAt(swapped, now, switchThreshold)?.used ?? used;
-    if (formatPercent(usedAfter) === formatPercent(used)) continue;
-    // On its own, the account frees up once every window the reset would
-    // empty resets; with nothing spent, once its first window resets.
-    const spent = account.windows.filter(
-      (window) => cleared(window) && (usedAt(window, now) ?? 0) > 0,
-    );
-    const resets = (spent.length > 0 ? spent : account.windows).map(
-      ({ resetAt }) => resetAt ?? Infinity,
-    );
-    const freesOn =
-      spent.length > 0 ? Math.max(...resets) : Math.min(...resets);
-    const freesAt = freesOn <= end ? freesOn : null;
-    const until = freesAt ?? end;
-    const score =
-      account.weight *
-      lead(served(after, until), served(account, until), now, until);
-    if (score <= 0) continue;
-    if (
-      best !== null &&
-      (score < bestScore * (1 - GAIN_TIE) ||
-        (score <= bestScore * (1 + GAIN_TIE) &&
-          (reset.expiresAt ?? Infinity) >= (best.expiresAt ?? Infinity)))
-    ) {
-      continue;
-    }
-    best = {
+  const cleared = ({ minutes }: UsageWindow) =>
+    reset.clears === null || reset.clears.includes(minutes ?? 0);
+  // A hold stays: Account Pooler keeps it through a new reading.
+  const after = {
+    ...account,
+    blocked: account.blocked && !account.windows.some(cleared),
+    windows: account.windows.map((window) =>
+      cleared(window)
+        ? { ...window, utilization: 0, resetAt: null, rejected: false }
+        : window,
+    ),
+  };
+  const swapped = accounts.map((other) => (other === account ? after : other));
+  const usedAfter = usageAt(swapped, now, switchThreshold)?.used ?? used;
+  // On its own, the account frees up once every window the reset would
+  // empty resets; with nothing spent, once its first window resets.
+  const spent = account.windows.filter(
+    (window) => cleared(window) && (usedAt(window, now) ?? 0) > 0,
+  );
+  const resets = (spent.length > 0 ? spent : account.windows).map(
+    ({ resetAt }) => resetAt ?? Infinity,
+  );
+  const freesOn = spent.length > 0 ? Math.max(...resets) : Math.min(...resets);
+  const freesAt = freesOn <= end ? freesOn : null;
+  const until = freesAt ?? end;
+  return {
+    plan: {
       account,
       expiresAt: reset.expiresAt,
       accountUsed: {
@@ -314,7 +298,47 @@ function planReset(
       },
       used: { before: used, after: usedAfter },
       freesAt,
-    };
+    },
+    score:
+      account.weight *
+      lead(served(after, until), served(account, until), now, until),
+  };
+}
+
+/**
+ * The reset worth spending: the one worth the most, of resets worth about
+ * the same the one that expires first. Only a reset that lowers the
+ * percentage shown now.
+ */
+function planReset(
+  accounts: readonly UsageAccount[],
+  used: number,
+  switchThreshold: number,
+  now: number,
+): ResetPlan | null {
+  let best: ResetPlan | null = null;
+  let bestScore = 0;
+  for (const account of accounts) {
+    const evaluated = evaluateReset(
+      accounts,
+      account,
+      used,
+      switchThreshold,
+      now,
+    );
+    if (evaluated === null) continue;
+    const { plan, score } = evaluated;
+    if (formatPercent(plan.used.after) === formatPercent(used)) continue;
+    if (score <= 0) continue;
+    if (
+      best !== null &&
+      (score < bestScore * (1 - GAIN_TIE) ||
+        (score <= bestScore * (1 + GAIN_TIE) &&
+          (plan.expiresAt ?? Infinity) >= (best.expiresAt ?? Infinity)))
+    ) {
+      continue;
+    }
+    best = plan;
     bestScore = score;
   }
   return best;
@@ -347,10 +371,109 @@ export function summarizeUsage(
           current === null
             ? null
             : planReset(own, current.used, switchThreshold, now),
+        accountPlans: new Map(
+          current === null
+            ? []
+            : own.flatMap((account) => {
+                const evaluated = evaluateReset(
+                  own,
+                  account,
+                  current.used,
+                  switchThreshold,
+                  now,
+                );
+                return evaluated === null
+                  ? []
+                  : [[account.id, evaluated.plan] as const];
+              }),
+        ),
         accounts: own,
       },
     ];
   });
+}
+
+/** A reset expiring this soon has to be used or it is lost. */
+const USE_OR_LOSE_MS = 72 * 60 * 60_000;
+
+/** Why an account may lose resets it holds. */
+export type ResetWarning =
+  /** A counted reset expires within 72 hours. */
+  | { kind: "expiring"; at: number }
+  /**
+   * `resets` counted resets expire by `by`, but the longest window they
+   * clear resets on its own only `natural` times before then.
+   */
+  | {
+      kind: "surplus";
+      resets: number;
+      natural: number;
+      by: number;
+      minutes: number;
+    };
+
+/** A window whose length and next reset are known. */
+interface TimedWindow {
+  minutes: number;
+  resetAt: number;
+}
+
+/** How often `window` resets on its own before `end`. */
+function naturalResets(window: TimedWindow, end: number): number {
+  if (window.resetAt > end) return 0;
+  return 1 + Math.floor((end - window.resetAt) / (window.minutes * 60_000));
+}
+
+/** The account's longest window a reset clears, with a reset still ahead. */
+function longestCleared(
+  account: UsageAccount,
+  clears: number[] | null,
+  now: number,
+): TimedWindow | null {
+  let longest: TimedWindow | null = null;
+  for (const { minutes, resetAt } of account.windows) {
+    if (minutes === null || resetAt === null || resetAt <= now) continue;
+    if (clears !== null && !clears.includes(minutes)) continue;
+    if (longest === null || minutes > longest.minutes) {
+      longest = { minutes, resetAt };
+    }
+  }
+  return longest;
+}
+
+/**
+ * Use or lose: a counted reset expires within 72 hours, or the account
+ * holds more resets than its limits reset on their own before they expire.
+ */
+export function resetWarning(
+  account: UsageAccount,
+  now: number,
+): ResetWarning | null {
+  const held = (account.resets?.items ?? [])
+    .filter(({ counted, count }) => counted && count > 0)
+    .sort((a, b) => (a.expiresAt ?? Infinity) - (b.expiresAt ?? Infinity));
+  const soonest = held[0]?.expiresAt ?? null;
+  if (soonest !== null && soonest <= now + USE_OR_LOSE_MS) {
+    return { kind: "expiring", at: soonest };
+  }
+  let resets = 0;
+  for (const item of held) {
+    if (item.expiresAt === null) break;
+    resets += item.count;
+    const window = longestCleared(account, item.clears, now);
+    if (window === null) continue;
+    const natural = naturalResets(window, item.expiresAt);
+    if (resets > natural) {
+      return {
+        kind: "surplus",
+        resets,
+        natural,
+        by: item.expiresAt,
+        minutes: window.minutes,
+      };
+    }
+  }
+  return null;
 }
 
 /** Whether the summary has spent quota worth a reset forecast. */

@@ -7,7 +7,7 @@ import {
   type RenderedSlot,
 } from "@get-bb/plugin-sdk/testing/app";
 import { toast } from "sonner";
-import type { UsageSnapshot } from "./server";
+import type { ResetDetail, UsageSnapshot } from "./server";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn() } }));
 
@@ -76,6 +76,19 @@ const snapshot: UsageSnapshot = {
 
 const empty: UsageSnapshot = { providers: [], accounts: [] };
 
+/** A Codex credit, which clears all of an account's limits. */
+const credit = (overrides: Partial<ResetDetail> = {}): ResetDetail => ({
+  title: null,
+  count: 1,
+  counted: true,
+  expiresAt: Date.UTC(2026, 9, 22, 12),
+  clears: null,
+  blocked: null,
+  blockedUntil: null,
+  next: false,
+  ...overrides,
+});
+
 /** Codex's account holds three resets, each clearing all of its limits. */
 const resettable: UsageSnapshot = {
   ...snapshot,
@@ -88,6 +101,15 @@ const resettable: UsageSnapshot = {
           plan: "Pro 20x",
           availableResets: 3,
           reset: { expiresAt: Date.UTC(2026, 9, 22, 12), clears: null },
+          resets: {
+            readAt: NOW,
+            failed: false,
+            items: [
+              credit({ next: true }),
+              credit({ expiresAt: Date.UTC(2026, 10, 20, 12) }),
+              credit({ expiresAt: Date.UTC(2026, 10, 24, 12) }),
+            ],
+          },
         }
       : account,
   ),
@@ -240,16 +262,30 @@ describe("usage panel", () => {
     ).toEqual(["1h72%", "2h54%", "3h36%", "4h18%"]);
   });
 
-  it("says how many resets there are when none lowers usage", async () => {
-    const accounts = snapshot.accounts.map((account) => ({
-      ...account,
-      availableResets: account.id === "claude-max" ? 1 : 0,
-    }));
+  it("ends a card with how many resets there are, which opens their list", async () => {
+    const accounts = snapshot.accounts.map((account) =>
+      account.id === "claude-max"
+        ? {
+            ...account,
+            availableResets: 1,
+            resets: {
+              readAt: NOW,
+              failed: false,
+              items: [credit({ clears: [300], blocked: "needs-limit" })],
+            },
+          }
+        : account,
+    );
     const slot = await renderDisclosure(() => ({ ...snapshot, accounts }));
 
     const claude = await slot.findByRole("region", { name: "Claude usage" });
-    expect(claude.lastElementChild?.textContent).toBe("1 reset available");
-    expect(within(claude).queryByRole("button")).toBeNull();
+    expect(claude.lastElementChild?.textContent).toBe(
+      "View resets (1 available)",
+    );
+    expect(claude.textContent).not.toContain("Reset to");
+    // Codex holds none, so its card has no such line.
+    const codex = slot.getByRole("region", { name: "Codex usage" });
+    expect(within(codex).queryByRole("button")).toBeNull();
   });
 
   it("turns usage red at the configured threshold", async () => {
@@ -282,6 +318,154 @@ describe("usage panel", () => {
     const slot = await renderDisclosure(() => empty);
 
     expect(await slot.findByText(/^No usage to show\./u)).toBeTruthy();
+  });
+});
+
+describe("resets list", () => {
+  /**
+   * Codex's three credits, plus Claude grants it can't use now and a Claude
+   * account whose resets couldn't be read.
+   */
+  const listed: UsageSnapshot = {
+    ...resettable,
+    accounts: resettable.accounts.map((account) =>
+      account.id === "claude-max"
+        ? {
+            ...account,
+            label: "Main",
+            email: "claude@example.com",
+            plan: "Max 20x",
+            availableResets: 3,
+            resets: {
+              readAt: NOW,
+              failed: false,
+              items: [
+                credit({
+                  title: "Launch reset",
+                  count: 3,
+                  expiresAt: NOW + 2 * DAY,
+                  clears: [300, 10_080],
+                  blocked: "needs-limit",
+                  next: true,
+                }),
+                credit({
+                  count: 5,
+                  counted: false,
+                  clears: [10_080],
+                  blocked: "paused",
+                }),
+              ],
+            },
+          }
+        : account.id === "claude-pro"
+          ? {
+              ...account,
+              label: "Work",
+              resets: { readAt: NOW - 25 * MINUTE, failed: true, items: [] },
+            }
+          : account,
+    ),
+  };
+
+  const resetCalls = (slot: RenderedSlot) =>
+    slot.inspection.rpcCalls.filter(({ method }) => method === "reset_use");
+
+  /** Opens the list from a provider's card. */
+  async function openList(slot: RenderedSlot, card: string, available: number) {
+    const region = await slot.findByRole("region", { name: `${card} usage` });
+    fireEvent.click(
+      within(region).getByRole("button", {
+        name: `View resets (${available} available)`,
+      }),
+    );
+    return slot.getByRole("dialog", { name: "Resets" });
+  }
+
+  const sections = (list: HTMLElement) =>
+    within(list)
+      .getAllByRole("region")
+      .map((section) => section.getAttribute("aria-label"));
+
+  const rows = (article: HTMLElement) =>
+    within(within(article).getByRole("list", { name: "Resets" }))
+      .getAllByRole("listitem")
+      .map((row) => row.textContent);
+
+  it("opens on both providers, the clicked one first, and spends nothing", async () => {
+    const slot = await renderDisclosure(() => listed);
+
+    const fromCodex = await openList(slot, "Codex", 3);
+    expect(sections(fromCodex)).toEqual(["Codex resets", "Claude resets"]);
+    expect(
+      within(fromCodex)
+        .getAllByRole("heading", { level: 3 })
+        .map((heading) => heading.textContent),
+    ).toEqual(["Codex3 available", "Claude3 available"]);
+    fireEvent.click(within(fromCodex).getByRole("button", { name: "Close" }));
+    await waitFor(() =>
+      expect(slot.queryByRole("dialog", { name: "Resets" })).toBeNull(),
+    );
+
+    const fromClaude = await openList(slot, "Claude", 3);
+    expect(sections(fromClaude)).toEqual(["Claude resets", "Codex resets"]);
+    expect(resetCalls(slot)).toEqual([]);
+  });
+
+  it("shows each account, its limits, and every reset it holds", async () => {
+    const slot = await renderDisclosure(() => listed);
+
+    const list = await openList(slot, "Codex", 3);
+    const codex = within(list).getByRole("region", { name: "Codex resets" });
+    expect(codex.querySelector(".pool-usage-advice")?.textContent).toBe(
+      "Use first: a reset on Personal. Brings Codex from 90% to 0%.",
+    );
+    const personal = within(codex).getByRole("article", { name: "Personal" });
+    expect(personal.querySelector("header")?.textContent).toBe(
+      "Personalcodex@example.com · Pro 20x3 resetsUse reset",
+    );
+    expect(
+      within(personal).getByRole("list", { name: "Limits" }).textContent,
+    ).toBe("Weekly: 90% used, resets in 2d");
+    expect(rows(personal)).toEqual([
+      "Expires Oct 22 (27 days left)Clears all limits1 resetCan be used nowUse first",
+      "Expires Nov 20 (56 days left)Clears all limits1 resetCan be used now",
+      "Expires Nov 24 (60 days left)Clears all limits1 resetCan be used now",
+    ]);
+    expect(personal.querySelector(".pool-usage-warning")).toBeNull();
+  });
+
+  it("marks no reset to use first when none can be used, and says why", async () => {
+    const slot = await renderDisclosure(() => listed);
+
+    const list = await openList(slot, "Claude", 3);
+    const claude = within(list).getByRole("region", { name: "Claude resets" });
+    expect(claude.querySelector(".pool-usage-advice")?.textContent).toBe(
+      "No reset is worth using now. None of them can be used right now.",
+    );
+    const main = within(claude).getByRole("article", { name: "Main" });
+    expect(rows(main)).toEqual([
+      "Launch resetExpires Sep 27 (2 days left)Clears 5-hour and weekly limits3 resetsNeeds the account to be at a limit",
+      "Expires Oct 22 (27 days left)Clears weekly limit5 resetsPaused · not in the total",
+    ]);
+    expect(claude.textContent).not.toContain("Use first");
+    expect(within(main).queryByRole("button")).toBeNull();
+    expect(main.querySelector(".pool-usage-warning")?.textContent).toBe(
+      "Use or lose: a reset expires in 2d.",
+    );
+  });
+
+  it("says a failed read failed and how old the last good one is, never 0", async () => {
+    const slot = await renderDisclosure(() => listed);
+
+    const list = await openList(slot, "Claude", 3);
+    const work = within(list).getByRole("article", { name: "Work" });
+    expect(within(work).getByRole("status").textContent).toBe(
+      "Couldn't read resets. Last read 25m ago.",
+    );
+    // No count at all: the name alone heads the account.
+    expect(work.querySelector("header")?.textContent).toBe("Work");
+    expect(work.textContent).not.toContain("0 reset");
+    expect(within(work).queryByRole("button")).toBeNull();
   });
 });
 
@@ -418,14 +602,29 @@ describe("footer summary", () => {
 });
 
 describe("reset", () => {
-  /** Asks for the reset on the Codex card and returns its confirmation. */
+  /**
+   * Opens the resets from the Codex card, asks for the reset on its account
+   * there, and returns the confirmation.
+   */
   async function openConfirmation(slot: RenderedSlot) {
-    const codex = await slot.findByRole("region", { name: "Codex usage" });
+    if (slot.queryByRole("dialog", { name: "Resets" }) === null) {
+      const codex = await slot.findByRole("region", { name: "Codex usage" });
+      fireEvent.click(
+        within(codex).getByRole("button", {
+          name: "View resets (3 available)",
+        }),
+      );
+    }
     fireEvent.click(
-      within(codex).getByRole("button", { name: "Reset to 0% (3 available)" }),
+      within(slot.getByRole("dialog", { name: "Resets" })).getByRole("button", {
+        name: "Use a reset on Personal (codex@example.com, Pro 20x)",
+      }),
     );
     return slot.getByRole("dialog", { name: "Use a Codex reset?" });
   }
+
+  const confirmationOf = (slot: RenderedSlot) =>
+    slot.queryByRole("dialog", { name: "Use a Codex reset?" });
 
   const buttons = (element: HTMLElement) =>
     within(element)
@@ -461,10 +660,14 @@ describe("reset", () => {
     );
     fireEvent.keyDown(await openConfirmation(slot), { key: "Escape" });
 
+    expect(confirmationOf(slot)).toBeNull();
+    // Back on the list, over the card, which the open list hides from
+    // assistive tech meanwhile.
+    expect(slot.getByRole("dialog", { name: "Resets" })).toBeTruthy();
     expect(
-      slot.queryByRole("dialog", { name: "Use a Codex reset?" }),
-    ).toBeNull();
-    expect(slot.getByRole("dialog", { name: "Codex usage" })).toBeTruthy();
+      document.querySelector('[role="dialog"][aria-label="Codex usage"]')
+        ?.getAttribute("data-state"),
+    ).toBe("open");
     expect(resetCalls(slot)).toEqual([]);
   });
 
@@ -477,7 +680,7 @@ describe("reset", () => {
       }),
     );
 
-    await waitFor(() => expect(slot.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(confirmationOf(slot)).toBeNull());
     expect(resetCalls(slot)).toEqual([
       {
         method: "reset_use",
@@ -520,7 +723,7 @@ describe("reset", () => {
       within(confirmation).getByRole("button", { name: "Try again" }),
     );
 
-    await waitFor(() => expect(slot.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(confirmationOf(slot)).toBeNull());
     const [first, second] = resetCalls(slot);
     expect(second).toEqual(first);
   });

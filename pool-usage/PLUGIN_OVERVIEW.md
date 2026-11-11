@@ -20,11 +20,13 @@ showing when the total drops next and what it drops to.
 ## Resets
 
 When Account Pooler's Claude or Codex accounts hold resets, which clear an
-account's usage limits early, the card ends with a line such as
-"Reset to 27% (3 available)": the total right after the reset that frees the
-most capacity over the next week. Clicking it asks first, in BB's own dialog,
-naming the account, when the reset expires, and the total before and after.
-Only **Use reset** spends it.
+account's usage limits early, the card ends with "View resets (3 available)".
+It opens a list of every reset on every account: when each expires, what it
+clears, and whether it can be used now. The reset that frees the most capacity
+over the next week is marked **Use first**, and an account warns when it may
+lose resets it can't use in time. **Use reset** on an account asks first, in
+BB's own dialog, naming the account, when the reset expires, and the total
+before and after. Only the dialog's **Use reset** spends it.
 
 ## What it reads
 

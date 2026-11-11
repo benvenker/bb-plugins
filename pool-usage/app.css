@@ -173,3 +173,155 @@ li[data-pool-usage-anchor] {
 .pool-usage-reset span {
   color: var(--muted-foreground);
 }
+
+/* The list of resets, in bb's dialog or bottom sheet. */
+
+.pool-usage-resets {
+  display: grid;
+  gap: 20px;
+  font-size: 13px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pool-usage-provider-resets {
+  display: grid;
+  gap: 10px;
+}
+
+.pool-usage-provider-resets h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pool-usage-provider-resets h3 span,
+.pool-usage-account-name span,
+.pool-usage-windows,
+.pool-usage-reset-main span,
+.pool-usage-reset-state,
+.pool-usage-failed {
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+
+.pool-usage-advice {
+  margin: 0;
+}
+
+.pool-usage-account {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.pool-usage-account header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pool-usage-account-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  min-width: 0;
+}
+
+.pool-usage-account-count {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.pool-usage-windows,
+.pool-usage-reset-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pool-usage-windows {
+  font-size: 12px;
+}
+
+.pool-usage-reset-rows {
+  display: grid;
+  border-top: 1px solid var(--border);
+}
+
+.pool-usage-reset-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.pool-usage-reset-row:last-child {
+  border-bottom: 0;
+}
+
+.pool-usage-reset-main,
+.pool-usage-reset-side {
+  display: grid;
+  gap: 1px;
+}
+
+.pool-usage-reset-side {
+  justify-items: end;
+  text-align: right;
+}
+
+.pool-usage-reset-row[data-blocked="false"] .pool-usage-reset-state {
+  color: inherit;
+}
+
+.pool-usage-first {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--foreground);
+  color: var(--background);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pool-usage-warning,
+.pool-usage-failed {
+  margin: 0;
+  font-size: 12px;
+}
+
+.pool-usage-warning {
+  color: var(--destructive);
+}
+
+.pool-usage-use {
+  flex: none;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--input);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .pool-usage-use:hover {
+    background: var(--state-hover);
+  }
+}
+
+.pool-usage-use:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}

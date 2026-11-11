@@ -436,11 +436,15 @@ describe("plugin", () => {
   const CODEX_CREDITS_URL =
     "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
   const REQUEST_ID = "9c1f4a2e-6b3d-4f8a-a7e5-2d9c8b1a0f3e";
+  const DAY_MS = 24 * 60 * 60_000;
+  /** An ISO time `days` from the test's clock, as the providers send it. */
+  const daysFromNow = (days: number) =>
+    new Date(Date.now() + days * DAY_MS).toISOString();
   const credit = {
     id: "RateLimitResetCredit_1",
     status: "available",
     is_supported_by_plan: true,
-    expires_at: "2026-10-22T20:28:26Z",
+    expires_at: daysFromNow(30),
   };
   const dataDirs: string[] = [];
 
@@ -949,7 +953,7 @@ describe("plugin", () => {
   it("claims Claude's next grant, and a retry the same one", async () => {
     const accounts = [account({ observedAt: Date.now() })];
     const organization = "11111111-2222-4333-8444-555555555555";
-    const endsAt = "2027-01-01T00:00:00Z";
+    const endsAt = daysFromNow(30);
     let claims = 0;
     const fetch = vi.fn(
       async (input: string | URL | Request, init?: RequestInit) => {
@@ -1058,7 +1062,8 @@ describe("plugin", () => {
                   {
                     ...credit,
                     id: "later",
-                    expires_at: "2027-06-01T00:00:00Z",
+                    // After the shared credit, so that one goes first.
+                    expires_at: daysFromNow(60),
                   },
                   credit,
                   { ...credit, id: "unsupported", is_supported_by_plan: false },

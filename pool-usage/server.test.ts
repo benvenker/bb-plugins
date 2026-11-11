@@ -1249,6 +1249,271 @@ describe("plugin", () => {
     await harness.lifecycle.dispose();
   });
 
+  describe("reset details", () => {
+    /** The one Claude account's reading when Claude answers with `cedar`. */
+    async function claudeAccount(cedar: Record<string, unknown>) {
+      const accounts = [account({ observedAt: Date.now() })];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json({ cedar_ember: cedar })),
+      );
+      const { bb, harness } = createFakePluginHost({
+        pluginId: "pool-usage",
+        dataDir: await storeLogins(accounts),
+        sdk: { plugins: { callRpc: poolerRpc(accounts) } },
+      });
+      await plugin(bb);
+      const result = (await harness.behavior.callRpc(
+        "usage_get",
+      )) as UsageSnapshot;
+      await harness.lifecycle.dispose();
+      return result.accounts[0]!;
+    }
+
+    const counted = (reading: UsageSnapshot["accounts"][number]) =>
+      (reading.resets?.items ?? [])
+        .filter((item) => item.counted)
+        .reduce((sum, { count }) => sum + count, 0);
+
+    it("lists each held Claude grant, counting only the unpaused ones", async () => {
+      const endsAt = daysFromNow(20);
+      const later = daysFromNow(40);
+      const reading = await claudeAccount({
+        eligible: true,
+        next_grant_id: "g1",
+        grants: [
+          {
+            id: "g1",
+            label: "Launch reset",
+            resets_left: 2,
+            usable_now: true,
+            ends_at: endsAt,
+            clears: ["five_hour", "seven_day"],
+          },
+          {
+            id: "g2",
+            resets_left: 5,
+            paused: true,
+            usable_now: true,
+            ends_at: endsAt,
+            clears: ["seven_day"],
+          },
+          {
+            id: "g3",
+            resets_left: 3,
+            usable_now: true,
+            ends_at: later,
+            clears: ["seven_day"],
+          },
+          // Expired and used up: history, not resets.
+          { id: "g4", resets_left: 1, ends_at: "2020-01-01T00:00:00Z" },
+          { id: "g5", resets_left: 0, usable_now: true, ends_at: endsAt },
+        ],
+      });
+
+      expect(reading).toMatchObject({
+        availableResets: 5,
+        reset: { expiresAt: Date.parse(endsAt), clears: [300, 10_080] },
+      });
+      expect(counted(reading)).toBe(reading.availableResets);
+      const detail = {
+        title: null,
+        counted: true,
+        expiresAt: Date.parse(endsAt),
+        clears: [10_080],
+        blocked: null,
+        blockedUntil: null,
+        next: false,
+      };
+      expect(reading.resets).toEqual({
+        readAt: expect.any(Number),
+        failed: false,
+        items: [
+          {
+            ...detail,
+            title: "Launch reset",
+            count: 2,
+            clears: [300, 10_080],
+            next: true,
+          },
+          { ...detail, count: 5, counted: false, blocked: "paused" },
+          {
+            ...detail,
+            count: 3,
+            expiresAt: Date.parse(later),
+            blocked: "queued",
+          },
+        ],
+      });
+    });
+
+    it("says when Claude holds a grant back", async () => {
+      const endsAt = daysFromNow(20);
+      const grant = {
+        id: "g1",
+        resets_left: 1,
+        usable_now: false,
+        ends_at: endsAt,
+      };
+      const cooldownUntil = daysFromNow(1);
+      const blockers = [];
+      // One at a time: each stubs fetch with its own answer.
+      for (const overrides of [
+        { cooldown_until: cooldownUntil },
+        {},
+        { grants: [{ ...grant, use_requires_limit: false }] },
+        { eligible: false, grants: [{ ...grant, usable_now: true }] },
+      ]) {
+        const reading = await claudeAccount({
+          eligible: true,
+          next_grant_id: "g1",
+          grants: [grant],
+          ...overrides,
+        });
+        const [item] = reading.resets!.items;
+        blockers.push([
+          item!.blocked,
+          item!.blockedUntil,
+          item!.counted,
+          reading.availableResets,
+          reading.reset,
+        ]);
+      }
+
+      expect(blockers).toEqual([
+        ["cooldown", Date.parse(cooldownUntil), true, 1, undefined],
+        ["needs-limit", null, true, 1, undefined],
+        ["unavailable", null, true, 1, undefined],
+        // Claude won't let the account use it, so it isn't counted.
+        ["ineligible", null, false, 0, undefined],
+      ]);
+    });
+
+    it("lists each open Codex credit, without the ids a spend sends", async () => {
+      const accounts = [pooledCodex()];
+      const later = {
+        ...credit,
+        id: "RateLimitResetCredit_later",
+        title: "One free rate limit reset",
+        expires_at: daysFromNow(60),
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL | Request) =>
+          Response.json(
+            String(input) === CODEX_CREDITS_URL
+              ? {
+                  credits: [
+                    later,
+                    credit,
+                    {
+                      ...credit,
+                      id: "RateLimitResetCredit_plan",
+                      is_supported_by_plan: false,
+                    },
+                    {
+                      ...credit,
+                      id: "RateLimitResetCredit_redeemed",
+                      status: "redeemed",
+                    },
+                    {
+                      ...credit,
+                      id: "RateLimitResetCredit_expired",
+                      expires_at: "2020-01-01T00:00:00Z",
+                    },
+                  ],
+                }
+              : { rate_limit_reset_credits: { available_count: 2 } },
+          ),
+        ),
+      );
+      const { bb, harness } = createFakePluginHost({
+        pluginId: "pool-usage",
+        dataDir: await storeLogins(accounts),
+        sdk: { plugins: { callRpc: poolerRpc(accounts) } },
+      });
+      await plugin(bb);
+
+      const result = (await harness.behavior.callRpc(
+        "usage_get",
+      )) as UsageSnapshot;
+      const [reading] = result.accounts;
+      expect(reading).toMatchObject({
+        availableResets: 2,
+        reset: { expiresAt: Date.parse(credit.expires_at), clears: null },
+      });
+      expect(counted(reading!)).toBe(reading!.availableResets);
+      const detail = {
+        title: null,
+        count: 1,
+        counted: true,
+        clears: null,
+        blocked: null,
+        blockedUntil: null,
+        next: false,
+      };
+      expect(reading!.resets?.items).toEqual([
+        {
+          ...detail,
+          title: "One free rate limit reset",
+          expiresAt: Date.parse(later.expires_at),
+        },
+        { ...detail, expiresAt: Date.parse(credit.expires_at), next: true },
+        {
+          ...detail,
+          expiresAt: Date.parse(credit.expires_at),
+          counted: false,
+          blocked: "unsupported",
+        },
+      ]);
+      expect(JSON.stringify(result)).not.toMatch(
+        /RateLimitResetCredit|access-token/u,
+      );
+      await harness.lifecycle.dispose();
+    });
+
+    it("says a read failed and when the last one worked, never that there are none", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const accounts = [pooledCodex()];
+      let reachable = true;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL | Request) => {
+          if (!reachable) throw new TypeError("fetch failed");
+          return Response.json(
+            String(input) === CODEX_CREDITS_URL
+              ? { credits: [credit] }
+              : { rate_limit_reset_credits: { available_count: 1 } },
+          );
+        }),
+      );
+      const { bb, harness } = createFakePluginHost({
+        pluginId: "pool-usage",
+        dataDir: await storeLogins(accounts, Date.now() + 2 * DAY_MS),
+        sdk: { plugins: { callRpc: poolerRpc(accounts) } },
+      });
+      await plugin(bb);
+      const read = async () =>
+        ((await harness.behavior.callRpc("usage_get")) as UsageSnapshot)
+          .accounts[0]!;
+
+      const readAt = Date.now();
+      expect((await read()).resets).toMatchObject({ readAt, failed: false });
+      reachable = false;
+      // Past the ten minutes a read lasts, one read shows the last while the
+      // next runs.
+      vi.setSystemTime(Date.now() + 11 * 60_000);
+      await read();
+      vi.setSystemTime(Date.now() + 20_000);
+      const failed = await read();
+
+      expect(failed.resets).toEqual({ readAt, failed: true, items: [] });
+      expect(failed.availableResets).toBeUndefined();
+      expect(failed.reset).toBeUndefined();
+      await harness.lifecycle.dispose();
+    });
+  });
+
   it("defines one setting: the red threshold", async () => {
     const { bb, harness } = createFakePluginHost({ pluginId: "pool-usage" });
     await plugin(bb);

@@ -117,6 +117,43 @@ const sourceMeasurementSchema = z.object({
   }),
 });
 
+/** One Codex credit or Claude grant, with what the list shows of it. */
+const resetDetailSchema = z.object({
+  /** The provider's name for it; null when it gives none. */
+  title: z.string().nullable(),
+  /** Resets it holds: 1 for a Codex credit, `resets_left` for a grant. */
+  count: z.number().int().nonnegative(),
+  /** Whether `count` is part of the account's `availableResets`. */
+  counted: z.boolean(),
+  expiresAt: z.number().int().nullable(),
+  /** The lengths, in minutes, of the windows it clears; null for all. */
+  clears: z.array(z.number().int().positive()).nullable(),
+  /** Why it can't be used now; null when it can. */
+  blocked: z
+    .enum([
+      "paused",
+      "ineligible",
+      "cooldown",
+      "queued",
+      "needs-limit",
+      "unavailable",
+      "unsupported",
+    ])
+    .nullable(),
+  /** When a cooldown ends; null otherwise or when Claude doesn't say. */
+  blockedUntil: z.number().int().nullable(),
+  /** The one a spend on the account uses. */
+  next: z.boolean(),
+});
+
+const accountResetsSchema = z.object({
+  /** When resets were last read; null when no read has succeeded yet. */
+  readAt: z.number().int().nullable(),
+  /** The latest read failed, so `items` is empty, not a count of zero. */
+  failed: z.boolean(),
+  items: z.array(resetDetailSchema),
+});
+
 const usageAccountSchema = z.object({
   id: z.string().min(1),
   /** bb's provider id, such as `claude-code`. */
@@ -145,6 +182,8 @@ const usageAccountSchema = z.object({
       clears: z.array(z.number().int().positive()).nullable(),
     })
     .optional(),
+  /** Every reset the account holds; absent for accounts nobody can spend. */
+  resets: accountResetsSchema.optional(),
 });
 
 const usageProviderSchema = z.object({
@@ -161,6 +200,8 @@ const usageSnapshotSchema = z.object({
 
 export type UsageWindow = z.infer<typeof usageWindowSchema>;
 export type UsageAccount = z.infer<typeof usageAccountSchema>;
+export type ResetDetail = z.infer<typeof resetDetailSchema>;
+export type AccountResetList = z.infer<typeof accountResetsSchema>;
 export type UsageProvider = z.infer<typeof usageProviderSchema>;
 export type UsageSnapshot = z.infer<typeof usageSnapshotSchema>;
 export type PoolAccount = z.infer<typeof poolAccountSchema>;
@@ -809,7 +850,45 @@ interface AccountResets {
     /** The lengths, in minutes, of the windows it clears; null for all. */
     clears: number[] | null;
   } | null;
+  /** Every open credit or grant, without the ids a spend sends. */
+  items: ResetDetail[];
 }
+
+/** The Claude windows a grant clears, as minutes; empty when unreadable. */
+function claudeClears(grant: Json): number[] {
+  return (Array.isArray(grant.clears) ? grant.clears : []).flatMap(
+    (name: unknown) => CLAUDE_WINDOWS.get(String(name)) ?? [],
+  );
+}
+
+/** Why Claude won't apply the grant now, in the order Claude checks. */
+function grantBlocker(
+  grant: Json,
+  program: Json,
+  now: number,
+): Pick<ResetDetail, "blocked" | "blockedUntil"> {
+  const cooldownUntil = parseTime(program.cooldown_until);
+  const blocked: ResetDetail["blocked"] =
+    grant.paused === true
+      ? "paused"
+      : program.eligible !== true
+        ? "ineligible"
+        : cooldownUntil !== null && cooldownUntil > now
+          ? "cooldown"
+          : grant.id !== program.next_grant_id
+            ? "queued"
+            : grant.usable_now !== true
+              ? grant.use_requires_limit === false
+                ? "unavailable"
+                : "needs-limit"
+              : null;
+  return {
+    blocked,
+    blockedUntil: blocked === "cooldown" ? cooldownUntil : null,
+  };
+}
+
+type ReadResets = AccountResets & { readAt: number };
 
 type SpendOutcome =
   { outcome: "reset" } | { outcome: "refused"; message: string };
@@ -886,8 +965,10 @@ export default function plugin(bb: BbPluginApi): void {
   );
   const resetCache = new Map<
     string,
-    { readAt: number; value: Promise<AccountResets | null> }
+    { readAt: number; value: Promise<ReadResets | null> }
   >();
+  /** When each account's resets were last read without failing. */
+  const lastResets = new Map<string, number>();
   /** Accounts with a spend on its way. */
   const spending = new Set<string>();
   let claudeAgent: { readAt: number; value: Promise<string> } | null = null;
@@ -1000,18 +1081,19 @@ export default function plugin(bb: BbPluginApi): void {
         fetchJson(`${CODEX_API}/usage`, headers),
         fetchJson(`${CODEX_API}/rate-limit-reset-credits`, headers),
       ]);
-      const count: unknown =
+      const reported: unknown =
         usage.rate_limit_reset_credits?.available_count ?? 0;
-      if (!isCount(count)) throw new Error("unreadable reset count");
+      if (!isCount(reported)) throw new Error("unreadable reset count");
+      // Redeemed and expired credits are history, not resets.
+      const open = (list.credits as Json[]).filter(
+        (credit) =>
+          credit?.status === "available" &&
+          typeof credit.id === "string" &&
+          isOpen(credit.expires_at, now),
+      );
       // The credit that expires first; a Codex reset clears every window.
-      const next = (list.credits as Json[])
-        .filter(
-          (credit) =>
-            credit?.status === "available" &&
-            credit.is_supported_by_plan !== false &&
-            typeof credit.id === "string" &&
-            isOpen(credit.expires_at, now),
-        )
+      const next = open
+        .filter((credit) => credit.is_supported_by_plan !== false)
         .map((credit) => ({
           id: credit.id as string,
           expiresAt: parseTime(credit.expires_at),
@@ -1020,7 +1102,27 @@ export default function plugin(bb: BbPluginApi): void {
         .sort(
           (a, b) => (a.expiresAt ?? Infinity) - (b.expiresAt ?? Infinity) || 0,
         )[0];
-      return { count, next: next ?? null };
+      const items = open.map((credit): ResetDetail => {
+        const supported = credit.is_supported_by_plan !== false;
+        return {
+          title: typeof credit.title === "string" ? credit.title : null,
+          count: 1,
+          counted: supported,
+          expiresAt: parseTime(credit.expires_at),
+          clears: null,
+          blocked: supported ? null : "unsupported",
+          blockedUntil: null,
+          next: credit.id === next?.id,
+        };
+      });
+      const count = items.filter(({ counted }) => counted).length;
+      // The list is what a spend draws on, so its count is the one shown.
+      if (count !== reported) {
+        bb.log.debug(
+          `Codex reports ${reported} resets for account ${account.id} but lists ${count}`,
+        );
+      }
+      return { count, next: next ?? null, items };
     }
     const program = (
       await fetchJson(
@@ -1028,15 +1130,19 @@ export default function plugin(bb: BbPluginApi): void {
         headers,
       )
     ).cedar_ember;
-    if (!program?.eligible || !Array.isArray(program.grants)) {
-      return { count: 0, next: null };
+    if (!Array.isArray(program?.grants)) {
+      return { count: 0, next: null, items: [] };
     }
-    const open: Json[] = program.grants.filter(
+    // Used-up and expired grants are history, not resets.
+    const held: Json[] = program.grants.filter(
       (grant: Json) =>
-        grant?.paused !== true &&
-        isCount(grant.resets_left) &&
+        isCount(grant?.resets_left) &&
+        grant.resets_left > 0 &&
         isOpen(grant.ends_at, now),
     );
+    const open = program.eligible
+      ? held.filter((grant) => grant.paused !== true)
+      : [];
     // The grant Claude Code would claim.
     const grant = open.find(
       ({ id, usable_now, resets_left }) =>
@@ -1053,10 +1159,19 @@ export default function plugin(bb: BbPluginApi): void {
           : {
               id: grant.id,
               expiresAt: parseTime(grant.ends_at),
-              clears: (Array.isArray(grant.clears) ? grant.clears : []).flatMap(
-                (name: unknown) => CLAUDE_WINDOWS.get(String(name)) ?? [],
-              ),
+              clears: claudeClears(grant),
             },
+      items: held.map(
+        (each): ResetDetail => ({
+          title: typeof each.label === "string" ? each.label : null,
+          count: each.resets_left,
+          counted: open.includes(each),
+          expiresAt: parseTime(each.ends_at),
+          clears: claudeClears(each),
+          ...grantBlocker(each, program, now),
+          next: each === grant,
+        }),
+      ),
     };
   }
 
@@ -1064,13 +1179,18 @@ export default function plugin(bb: BbPluginApi): void {
    * Read again after ten minutes, showing the last read meanwhile. A failed
    * read shows none, since the login may have ended.
    */
-  function cachedResets(account: PoolAccount): Promise<AccountResets | null> {
+  function cachedResets(account: PoolAccount): Promise<ReadResets | null> {
     const hit = resetCache.get(account.id);
     if (hit !== undefined && Date.now() - hit.readAt < RESETS_TTL_MS) {
       return hit.value;
     }
     const value = authHeaders(account)
       .then((headers) => readResets(account, headers))
+      .then((resets) => {
+        const read = { ...resets, readAt: Date.now() };
+        lastResets.set(account.id, read.readAt);
+        return read;
+      })
       .catch((cause: unknown) => {
         bb.log.debug(
           `Could not read resets for ${account.provider} account ${account.id}: ${errorMessage(cause)}`,
@@ -1211,6 +1331,11 @@ export default function plugin(bb: BbPluginApi): void {
         resetCache.delete(id);
       }
     }
+    for (const id of lastResets.keys()) {
+      if (!spendable.some((account) => account.id === id)) {
+        lastResets.delete(id);
+      }
+    }
     if (accounts.length === 0) return { providers: [], accounts: [], served };
     // Resets come from the providers, so they load alongside the rest.
     const pendingResets = Promise.all(
@@ -1218,7 +1343,7 @@ export default function plugin(bb: BbPluginApi): void {
         account.id,
         await cachedResets(account),
       ]),
-    ).then((entries) => new Map(entries as [string, AccountResets | null][]));
+    ).then((entries) => new Map(entries as [string, ReadResets | null][]));
     const plans = await codexPlans(accounts);
     const switchThreshold = await fetchSwitchThreshold(bb);
     const accountResets = await pendingResets;
@@ -1239,15 +1364,28 @@ export default function plugin(bb: BbPluginApi): void {
           resetUsedAt: used.get(account.id),
         });
         const own = accountResets.get(account.id);
-        if (own === undefined || own === null) return normalized;
-        const { count, next } = own;
+        if (own === undefined) return normalized;
+        // A failed read says so; it never reads as no resets.
+        if (own === null) {
+          return {
+            ...normalized,
+            resets: {
+              readAt: lastResets.get(account.id) ?? null,
+              failed: true,
+              items: [],
+            },
+          };
+        }
+        const { count, next, items, readAt } = own;
+        const resets = { readAt, failed: false, items };
         return count > 0 && next !== null
           ? {
               ...normalized,
               availableResets: count,
               reset: { expiresAt: next.expiresAt, clears: next.clears },
+              resets,
             }
-          : { ...normalized, availableResets: count };
+          : { ...normalized, availableResets: count, resets };
       }),
     };
   }
